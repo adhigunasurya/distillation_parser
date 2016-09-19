@@ -1,4 +1,4 @@
-# graph-based distillation parser
+# Graph-Based Distillation Parser
 
 The code for a graph-based parser with discriminative training that distills an ensemble of greedy dependency parsers into a single parser
 
