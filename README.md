@@ -1,6 +1,6 @@
 # Graph-Based Distillation Parser
 
-The code for a graph-based parser with discriminative training that distills an ensemble of greedy dependency parsers into a single parser
+The code for a graph-based parser with discriminative training that distills an ensemble of greedy dependency parsers into a single parser. [Paper](https://arxiv.org/abs/1609.07561) pubslihed at EMNLP 2016 as a long paper.
 
 # Code
 
@@ -16,3 +16,6 @@ If you use the code, please cite the following work:
   booktitle={Proc. EMNLP},
   year=2016,
 } 
+
+# Contact
+For any questions or issues please e-mail adhiguna.kuncoro [ AT SYMBOL ] gmail [ DOT ] com
