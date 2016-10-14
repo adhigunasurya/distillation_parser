@@ -38,7 +38,7 @@ Assuming current directory is `build/`
 
 ### Training the distillation parser (Chinese)
 
-`nohup graph-parse/graph-parse-new-cost-mbr --cnn_mem 1700 -t [chinese_train.conll]  -d [chinese_dev.conll] -P --pretrained_dim [pretrained word embedding dimension] -w [pretrained word embedding file] --cost_matrix ../costs/matrices_chinese.txt --eta_decay 0.05 --num_ensemble 21 -x > log_chinese.txt      `
+`nohup graph-parse/graph-parse-new-cost-mbr --cnn_mem 1700 -t [chinese_train.conll]  -d [chinese_dev.conll] -P --pretrained_dim [pretrained word embedding dimension] -w [pretrained word embedding file] --cost_matrix ../costs/matrices_chinese.txt --eta_decay 0.05 --num_ensemble 17 -x > log_chinese.txt      `
 
 ### Parameter files
 
