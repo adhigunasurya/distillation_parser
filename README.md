@@ -17,6 +17,12 @@ The code for a graph-based parser with discriminative training that distills an 
     cmake .. -DEIGEN3_INCLUDE_DIR=/path/to/eigen
     make -j2
 
+# Sample input file
+
+The sample input file for English PTB-SD is at
+
+`sample_input/sample_input_en.txt`
+
 # Code
 
 The code and full instructions will be released before EMNLP 2016
