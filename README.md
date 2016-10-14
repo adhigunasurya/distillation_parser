@@ -36,9 +36,13 @@ The English ensemble votes were computed with 21 models, while the Chinese ensem
 Assuming current directory is `build/`      
 `nohup graph-parse/graph-parse-new-cost-mbr --cnn_mem 1700 -t [train.conll]  -d [dev.conll] -P --pretrained_dim [pretrained word embedding dimension] -w [pretrained word embedding file] --cost_matrix ../costs/matrices_PTB_SD.txt --eta_decay 0.05 --num_ensemble 21 -x > log_en.txt`      
 
+For the best results train the model for 3-4 days.
+
 ### Training the distillation parser (Chinese)
 
-`nohup graph-parse/graph-parse-new-cost-mbr --cnn_mem 1700 -t [chinese_train.conll]  -d [chinese_dev.conll] -P --pretrained_dim [pretrained word embedding dimension] -w [pretrained word embedding file] --cost_matrix ../costs/matrices_chinese.txt --eta_decay 0.05 --num_ensemble 17 -x > log_chinese.txt      `
+`nohup graph-parse/graph-parse-new-cost-mbr --cnn_mem 1700 -t [chinese_train.conll]  -d [chinese_dev.conll] -P --pretrained_dim [pretrained word embedding dimension] -w [pretrained word embedding file] --cost_matrix ../costs/matrices_chinese.txt --eta_decay 0.05 --num_ensemble 17 -x > log_chinese.txt`     
+
+For the best results train the model for 3-4 days.
 
 ### Parameter files
 
