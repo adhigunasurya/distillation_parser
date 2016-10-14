@@ -49,7 +49,7 @@ For the best results train the model for 3-4 days.
 To find out where the parameter file is saved to, look at the `log_en.txt` and `log_chinese.txt`       
 
 ### Decoding with the distillation parser (English and Chinese)
-`nohup graph-parse/graph-parse-new-cost-mbr --cnn_mem 1700 -t [train.conll]  -p [test.conll] -P --pretrained_dim [pretrained word embedding dimension] -w [pretrained word embedding file] -m [parameter file (.params extension)] > output.txt`     
+`graph-parse/graph-parse-new-cost-mbr --cnn_mem 1700 -t [train.conll]  -p [test.conll] -P --pretrained_dim [pretrained word embedding dimension] -w [pretrained word embedding file] -m [parameter file (.params extension)] > output.txt`     
 
 ### Evaluation (without punctuations)
 `perl eval.pl -s output.txt -g [test.conll] -q`     
