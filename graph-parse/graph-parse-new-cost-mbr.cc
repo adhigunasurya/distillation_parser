@@ -10,10 +10,7 @@
 #include "cnn/expr.h"
 
 #include "Eisner.cc"
-//#include "CLE.cc"
 
-//#include "c2.h"
-//#include "word-embed.h"
 
 #include <iostream>
 #include <fstream>
@@ -154,53 +151,6 @@ set<unsigned> getSingletons(const vector<vector<int>>& sentenceWords) {
 }
 
 
-//buld L_hat, unncessary for margin-based methods
-/*
-Expression build_matrix(unsigned n, ComputationGraph& cg, vector<Expression>& w, vector<Expression>& root_score) {
-  // convert the embedding for each word into an Expression, returning a vector of Expression
-  assert (w.size() == (n * n));
-  assert (root_score.size() == n);
-  vector<Expression> w(n);
-  for (unsigned i = 0; i < n; ++i) {
-    w[i] = input(cg, {dim}, w_i[i]);   
-  } 
-  assert (w.size() == n); 
-  vector<vector<Expression>> A(n, vector<Expression>(n)); //note that A[i] returns a column vector 
-  Expression zero = zeroes(cg, {1});
-  for (unsigned h = 0; h < n; ++h) {
-    for (unsigned m = 0; m < n; ++m) {
-      if (h == m) {
-        A[m][h] = zero;
-      }
-      else {
-        Expression cell_expression = exp(w[rc2ind(h, m, n)]);
-        //cerr << "A(m, h)=" << as_scalar(cg.incremental_forward()) << endl; 
-        A[m][h] = cell_expression;
-        float adj_score = as_scalar(cg.incremental_forward());
-        assert (adj_score < 500.0f);
-        //cerr << "A(" << m << ",h): " << adj_score << endl; 
-      }
-     
-    }
-  }
-  
-  vector<Expression> L(n * n);
-  for (unsigned h = 0; h < n; ++h) {
-    for (unsigned m = 0; m < n; ++m) {
-      if (h == m) L[rc2ind(h, m, n)] = sum(A[m]);
-      else L[rc2ind(h, m, n)] = -A[m][h];
-    }
-  }
-  //add the root embedding on the topmost row
-  for(unsigned m = 0; m < n; m++) {
-        //imagine m is the root
-        //have an embedding of the root, then compute the score of that token being the root of the whole sentence
-        L[rc2ind(0, m, n)] = exp(root_score[m]);
-  }
-  Expression cnnL = reshape(concatenate(L), {n, n});
-  return cnnL;
-} */
-
 template <class Builder>
 struct ParserBuilder {
   Builder l2rbuilder;
@@ -283,13 +233,13 @@ struct ParserBuilder {
     if (p_t_input) t_input = parameter(cg, p_t_input);
     // first compose the tokens and tags to form the LSTM input
     vector<Expression> composedInput(toks.size());
-    //cerr << "Sentence length: " << toks.size() << endl;
     assert (singletons.size() > 0);
     for (unsigned t = 0; t < toks.size(); ++t) {
-      //cerr << "Composing input number: " << t << endl; 
       Expression i_i;
       Expression w;
       if (apply_dropout && singletons.count(toks[t])) {
+        // with a 0.5 probability, a singleton word at training will be treated as the UNK symbol. 
+        // using this approach we can train a good UNK vector while still training the embedding of rare words.
         int flip = rand() % 2 + 1;
         assert (flip == 1 || flip == 2);
         if (flip == 1)
@@ -309,10 +259,8 @@ struct ParserBuilder {
         unsigned idx = pret_idx[t]; 
         Expression pret = const_lookup(cg, p_t, idx); 
         i_i = affine_transform({i_i, t_input, pret});
-      } else {
-        //cerr << "Not pre-trained, sentence length: " << toks.size() << endl;
-        //cerr << "Not pre-trained index: " << t << endl; 
-      }
+      } 
+
       //Lastly, apply some non-linearity
       composedInput[t] = rectify(i_i);
     }
@@ -326,13 +274,13 @@ struct ParserBuilder {
     // read sequence from right to left
     deque<Expression> right_Output;
     for (unsigned t = 0; t < slen; ++t) {
-      //r2lbuilder.add_input(we->embed(toks[slen - t - 1]));
       r2lbuilder.add_input(composedInput[slen - t - 1]);
       right_Output.push_front(r2lbuilder.back());
     }
     assert (right_Output.size() == left_Output.size());
     assert (right_Output.size() == slen);
     vector<Expression> result;
+    // concatenate the embedding from the left and right LSTMs
     for (unsigned i = 0; i < left_Output.size(); ++i)
       result.push_back(concatenate({left_Output[i], right_Output[i]}));
     assert (result.size() == right_Output.size());
@@ -342,20 +290,21 @@ struct ParserBuilder {
   pair<Eigen::MatrixXf, Eigen::MatrixXf> BuildGraph(const vector<int>& toks, const vector<int>& pret_idx, const vector<int>& tags, ComputationGraph& cg, const vector<int>& heads, const vector<int>& labels, bool apply_dropout, vector<Expression>& embedded, const vector<float>& currCost) {
     assert (toks.size() == pret_idx.size() && toks.size() == tags.size() && toks.size() == heads.size() && toks.size() == labels.size());
     if (currCost.size() > 0) {
-      assert (apply_dropout); //only applies if we're in training mode
+      assert (apply_dropout); //cost-sensitive training only applies if we're in training mode
     }
-    //Embed the sentence
+    //Embed the sentence with bidirectional LSTM
     const unsigned slen = toks.size();
     embedded = EmbedBiLSTM(cg, toks, pret_idx, tags, apply_dropout);
-    //cerr << "Milestone 1" << endl;
     assert (embedded.size() == slen);
     vector<Expression> result(slen * slen);
-    //cerr << "Milestone 1" << endl;
+
     Expression MLP_features = parameter(cg, p_MLP_features);
     Expression MLP_bias = parameter(cg, p_MLP_bias);
     Expression score_bias = parameter(cg, p_score_bias);
     Expression MLP_output = parameter(cg, p_MLP_output);
     Expression zero = input(cg, 0.0f);
+
+    // compute the (local) score of an arc based on the bidirectional LSTM encoding
     vector<Expression> sum_MLP_squared_norm;
     sum_MLP_squared_norm.push_back(zero);
     for (unsigned h = 0; h < toks.size(); ++h) {
@@ -365,41 +314,40 @@ struct ParserBuilder {
             if (h != m) //only add the regulariser cost if the head is not equal to the modifier
             sum_MLP_squared_norm.push_back(squared_norm(MLP_hidden));
             result[rc2ind(h, m, slen)] = dot_product(MLP_output, MLP_hidden) + score_bias;  //no non-linearity is applied to the final scoring function
-            //result[rc2ind(h, m, slen)] = dot_product(concatenate(embedded[h], embedded[m]), hidden_score) + score_bias; 
         }
     }
     assert (sum_MLP_squared_norm.size() == (toks.size() * toks.size() - toks.size() + 1));
-    //cerr << "Milestone 2" << endl;
     assert (result.size() == (slen * slen));
+
+    // reshape the score between all possible arcs into an n by n matrix, where n = number of tokens
     Expression result_expr = reshape(concatenate(result), {slen, slen});
     auto& result_matrix = *(cg.incremental_forward()); // n by n matrix representing the scores, excluding root selection scores
+
+    // compute the scores of each token being the root of the sentence (using a separate 1-hidden layer neural net)
     Expression root_score = parameter(cg, p_root_score);
     Expression root_score_bias = parameter(cg, p_root_score_bias);
     Expression root_MLP = parameter(cg, p_root_MLP);
     Expression root_MLP_bias = parameter(cg, p_root_MLP_bias);
     vector<Expression> root_scores(slen);
-    //cerr << "Initial size of root_scores: " << root_scores.size() << endl;
     for (unsigned m = 0; m < slen; ++m) { 
       Expression hidden_root_score = tanh(affine_transform({root_MLP_bias, root_MLP, embedded[m]})); 
       root_scores[m] = dot_product(hidden_root_score, root_score) + root_score_bias;
     }
-    //cerr << "Size of the root scores: " << root_scores.size() << endl;
-    //cerr << "Length of the sentence: " << slen << endl;
     assert (root_scores.size() == slen);  
     Expression root_scores_expr = reshape(concatenate(root_scores), {1, slen});
     auto& root_scores_vector = *(cg.incremental_forward());
-    //if during training time, get the cost matrix, obtain the CLE, and back-propagate
+
+    //if during training time, get the distillation cost matrix, obtain the CLE, and back-propagate
     if (apply_dropout) {
       vector<float> cost((slen + 1) * (slen + 1), 1.0);
       int count_root = 0;
-      if (USE_ENSEMBLE) {
+      if (USE_ENSEMBLE) { // if using the distillation cost function
         assert (currCost.size() > 0 && currCost.size() == ((slen + 1) * (slen + 1))); 
         for (unsigned head = 0; head < (slen + 1); ++head) {
           for (unsigned mod = 0; mod < (slen + 1); ++mod) {
             if (mod == 0) assert(currCost[head * (slen + 1) + mod] == 0.0);
             if (head == mod) assert(currCost[head * (slen + 1) + mod] == 0.0);
             float curr_cost = currCost[head * (slen + 1) + mod];
-            //cerr << "head: " << head << " mod: " << mod << " cost: " << currCost[head * (slen + 1) + mod] << endl;
             assert (curr_cost >= 0.0 && curr_cost <= NUM_ENSEMBLE);
             cost[rc2ind(head, mod, slen + 1)] -= (currCost[head * (slen + 1) + mod] / NUM_ENSEMBLE);
           }
@@ -407,40 +355,21 @@ struct ParserBuilder {
       } else {
         assert (currCost.size() == 0);
       }
-      //set the cost for all the gold edges to 0
-      
-      for (int mod = 0; mod < heads.size(); ++mod) {
-        assert (heads[mod] >= 0);
-        if (heads[mod] == 0) count_root += 1;
-        //cost[rc2ind(heads[mod], mod + 1, slen + 1)] = 0.0;
-      } 
-      assert (count_root >= 1);
-      //cerr << "Accumulation: " << accumulate(cost.begin(), cost.end(), 0.0) << endl;
-      //cerr << "Heads: " << endl;
-      //for (int i = 0; i < heads.size(); ++i) cerr << heads[i] << " ";
-      //cerr << "-------End heads---------" << endl;
-      //assert (accumulate(cost.begin(), cost.end(), 0.0) == ((slen + 1) * (slen + 1) - heads.size()));
+
+      assert (count_root >= 1); // a sentence must have at least one root (more for other languages like German)
+
+      // the cost matrix (whether distillation or regular Hamming cost) is put back into the computation graph
       Expression cost_matrix = input(cg, {slen + 1, slen + 1}, cost);
       auto eigen_cost_matrix = *(cg.incremental_forward());
+      // fill in the cost of the root token (col. 0) and all diagonals with a very small number
+      // this is because the root token cannot have any heads and a token cannot be a head of itself (diagonal entries on the matrix)
       eigen_cost_matrix.col(0).fill(-9e+99);
       eigen_cost_matrix.diagonal().fill(-9e+99);
-      //cerr << eigen_cost_matrix << endl << endl; //DEBUG MODE
-      //cerr << "---------------------------------" << endl;
-      //cerr << "Printing the original cost matrix" << endl;
-      //cerr << eigen_cost_matrix << endl;
-      //cerr << "---------------------------------" << endl;
-      // add the original scores to the cost
-      //cerr << "Dim of the root scores vector: " << root_scores_vector.rows() << " " << root_scores_vector.cols() << endl;
-      //cerr << "Dim of the result matrix: " << result_matrix.rows() << " " << result_matrix.cols() << endl;
-      //cerr << "slen: " << slen << endl;
+      
       assert (root_scores_vector.cols() == slen && root_scores_vector.rows() == 1 && result_matrix.rows() == slen && result_matrix.cols() == slen);
       eigen_cost_matrix.block(1, 1, slen, slen) = eigen_cost_matrix.block(1, 1, slen, slen) + result_matrix; 
       eigen_cost_matrix.block(0, 1, 1, slen) = eigen_cost_matrix.block(0, 1, 1, slen) + root_scores_vector;
-      // print out all the cost, after adding all the scores
-      //cerr << "---------------------------------" << endl;
-      //cerr << "Printing the cost matrix after adding the scores and root selections" << endl;
-      //cerr << eigen_cost_matrix << endl;
-      //cerr << "---------------------------------" << endl;
+
       // Find the highest-scoring tree according to the model, which may not correspond with the real gold tree
       vector<int> arg_max;
       arg_max.push_back(-999);
@@ -450,19 +379,12 @@ struct ParserBuilder {
         maxVal(i) = eigen_cost_matrix.col(i).maxCoeff(&maxIndex[i]);
         arg_max.push_back(maxIndex[i]);
       }
-      //vector<int> max_neg = CLE_recursive(eigen_cost_matrix); 
       vector<int> max_neg = arg_max;
       assert (arg_max.size() == eigen_cost_matrix.cols());
 
-      //cerr << "printing max neg" << endl;
-      //for (int mod = 0; mod < max_neg.size(); ++mod) {
-      //  cerr << mod << " " << max_neg[mod] << endl;
-      //}
-      //cerr << "---------------" << endl;
       vector<Expression> loss_sum;
-      //Expression one = input(cg, 1.0f);
       //max_neg is the highest-scoring head for each modifier, according to CLE
-       Expression zero = zeroes(cg, {1});
+      Expression zero = zeroes(cg, {1});
       for (int mod = 0; mod < max_neg.size(); ++mod) {
         if (mod != 0) {
           assert (max_neg[mod] >= 0);
@@ -471,6 +393,7 @@ struct ParserBuilder {
             float currCost = cost[rc2ind(max_neg[mod], mod, slen + 1)];
             Expression goldCostExp = input(cg, goldCost);
             Expression currCostExp = input(cg, currCost);
+            // cost-augmented score = model score + cost
             Expression currScore = result[rc2ind(max_neg[mod] - 1, mod - 1, slen)] + currCostExp;
             Expression goldScore;
             if (heads[mod-1] > 0) { 
@@ -478,23 +401,15 @@ struct ParserBuilder {
             } else {
 	     goldScore = root_scores[mod - 1] + goldCostExp;
             }
+            // the loss for picking a particular arc over the gold arc
             Expression currLoss = max(currScore - goldScore, zero);
-            if (heads[mod-1] == max_neg[mod]) {
+            if (heads[mod-1] == max_neg[mod]) { // if the predicted head is correct, make sure the loss is zero
               double currLossScalar = as_scalar(cg.incremental_forward());
               assert(currLossScalar == 0.0);
             }
             loss_sum.push_back(currLoss);
-            /*
-            if (heads[mod-1] == max_neg[mod]) //this basically means that the highest-scoring head for the particular modifier, according to the current model, is the same as the gold one, thus no extra cost
-              max_neg_sum.push_back(result[rc2ind(max_neg[mod] - 1, mod - 1, slen)]); 
-            else { //this means that the highest-scoring head for the particular modifier, according to the current model, is different with the gold one, thus add one (margin) to the cost
-              int head = max_neg[mod];
-              float currentCost = cost[rc2ind(head, mod, slen + 1)];
-              assert (currentCost > 0.0);
-              Expression true_cost = input(cg, currentCost);
-              max_neg_sum.push_back(result[rc2ind(max_neg[mod] - 1, mod - 1, slen)] + true_cost);
-            } */
           }
+
           else {//do the same for the root 
             float goldCost = cost[rc2ind(heads[mod-1], mod, slen + 1)];
             float currCost = cost[rc2ind(max_neg[mod], mod, slen + 1)];
@@ -508,79 +423,48 @@ struct ParserBuilder {
              goldScore = root_scores[mod - 1] + goldCostExp;
             }
             Expression currLoss = max(currScore - goldScore, zero);
-            if (heads[mod-1] == max_neg[mod]) {
+            if (heads[mod-1] == max_neg[mod]) { // if the predicted head is correct, make sure the loss is zero
               double currLossScalar = as_scalar(cg.incremental_forward());
               assert(currLossScalar == 0.0);
             }
             loss_sum.push_back(currLoss);
-            /*
-            if (heads[mod-1] == 0)
-              max_neg_sum.push_back(root_scores[mod - 1]);
-            else {
-              int head = max_neg[mod];
-              float currentCost = cost[rc2ind(head, mod, slen + 1)];
-              assert (currentCost > 0.0);
-              Expression true_cost = input(cg, currentCost);
-              max_neg_sum.push_back(root_scores[mod - 1] + true_cost);
-            } */
           }
+
         } else 
            assert (max_neg[mod] == -999);
       } 
       assert (loss_sum.size() == slen);
-     // Compute the score of the gold tree according to the model
-     /*
-     vector<Expression> gold_sum;
-     assert (heads.size() == slen);
-     for (int mod = 0; mod < heads.size(); ++mod) {
-       if (heads[mod] != 0)
-         gold_sum.push_back(result[rc2ind(heads[mod] - 1, mod, slen)]); 
-       else
-         gold_sum.push_back(root_scores[mod]);
-     }
-     assert (gold_sum.size() == slen);
-     Expression sum_1 = sum(max_neg_sum);
-     double sum_1_float = as_scalar(cg.incremental_forward());
-     Expression sum_2 = sum(gold_sum);
-     double sum_2_float = as_scalar(cg.incremental_forward()); */
-     //cerr << "Score of the highest-scoring negative sample: " << sum_1_float << " and Score of the gold tree: " << sum_2_float << endl;
+
+     // the total loss for the whole sentence is simply the sum of the loss of each arc
      Expression total_loss_exp = sum(loss_sum);
      double total_loss = as_scalar(cg.incremental_forward());
      assert (total_loss >= 0.0);
      cerr << "Score difference (including cost) between the model's best tree and the gold tree is " << total_loss << endl;
      
-     // part 1 component of the cost: difference between the model's best and gold tree, taking the margin into account
-     //cerr << "Start of the labeller part" << endl;
+     // part 1 component of the cost: difference between the model's best and gold tree, taking the cost into account
      Expression final_cost = total_loss_exp;
-     // part 2: pickneglog softmax for the labels
+     // part 2: loss for the labeler 
      Expression MLP_labels = parameter(cg, p_MLP_labels); 
      Expression MLP_labels_bias = parameter(cg, p_MLP_labels_bias);
      Expression MLP_labels_softmax = parameter(cg, p_MLP_labels_softmax);
      Expression MLP_labels_softmax_bias = parameter(cg, p_MLP_labels_softmax_bias);
-     //cerr << "Done loading the parameters" << endl;
      // get the hidden layer representation for the labeller MLP
      vector<Expression> labels_cost;
-     //labels_cost.push_back(zero);
      for (int mod = 0; mod < heads.size(); ++mod) {
        if (heads[mod] != 0) {
          assert (heads[mod]-1 != mod); //the head of a token should not be itself
          Expression MLP_labels_hidden = tanh(affine_transform({MLP_labels_bias, MLP_labels, concatenate({embedded[heads[mod]-1], embedded[mod]})})); 
          Expression labels_vec = log_softmax(affine_transform({MLP_labels_softmax_bias, MLP_labels_softmax, MLP_labels_hidden}));
-         //cerr << "before pick" << endl;
          Expression label_cost = -pick(labels_vec, labels[mod]);
          double label_cost_scalar = as_scalar(cg.incremental_forward());
-         //cerr << "label cost scalar: " << label_cost_scalar << endl;
          assert (label_cost_scalar >= 0.0);
-         //cerr << "after pick" << endl;
          labels_cost.push_back(label_cost);
        } else {
          labels_cost.push_back(zero);
        }
      }
-     //cerr << "Done filling the labels cost" << endl;
      assert (labels_cost.size() == (heads.size()));
      Expression final_labels_cost = sum(labels_cost);
-     //cerr << "Done summing the cost" << endl;
      assert (as_scalar(cg.incremental_forward()) >= 0.0);
      //part 3: regulariser
      Expression regulariser_cost_1 = sum(sum_MLP_squared_norm) * GAMMA / (sum_MLP_squared_norm.size()); 
@@ -590,82 +474,12 @@ struct ParserBuilder {
      cerr << "regulariser cost 1: " << regulariser_cost_1_scalar << " regulariser cost 2: " << regulariser_cost_2_scalar << endl;
      //Final part: add all the costs
      Expression truly_final_cost = final_cost + final_labels_cost + regulariser_cost_1 + regulariser_cost_2;
-     //cerr << "Iteration done" << endl;
-     // Expression sum_final = final_cost + ...
     } else {
-      
+      // we are not training, therefore the cost parts are not applicable  
     }
-    //cerr << "Milestone 3" << endl;
-    
-    /*
-    //compute the numerator
-    assert (heads.size() == slen);
-    unsigned ctr_root = 0;
-    vector<Expression> sum_entries;
-    for (unsigned m = 0; m < slen; ++m) {
-      if (heads[m] != 0) { 
-        sum_entries.push_back(result[rc2ind(heads[m], m, slen)]);
-        //cerr << "Milestone 3.5" << endl;
-      }
-//        sum_entries.push_back(result[rc2ind(heads[m], m, slen)]);
-      else {
-        ctr_root += 1;
-        sum_entries.push_back(root_scores[m]);
-        //cerr << "Milestone 3.75" << endl;
-//        sum_entries.push_back(root_scores[m]); 
-      }
-    }
-    //cerr << "Milestone 4" << endl;
-    assert (ctr_root == 1);
-    Expression num = (sum(sum_entries));
-    //Expression num = zeroes(cg, {1});
-    //cerr << "Milestone 4" << endl;
-    //cerr << "Numerator: " << as_scalar(cg.incremental_forward()) << endl;
-    //cerr << "Milestone 5" << endl;
-    Expression zero = zeroes(cg, {1});
-    vector<Expression> result_zeroes;
-    vector<Expression> root_zeroes;
-    for (int h = 0; h < slen; ++h) {
-      for (int m = 0; m < slen; ++m) {
-        result_zeroes.push_back(zero);
-      }
-    }
-    for (int m = 0; m < slen; ++m) {
-      root_zeroes.push_back(zero);
-    }
-    Expression denom = build_matrix(slen, cg, result, root_scores); 
-    //Expression denom = build_matrix(slen, cg, result_zeroes, root_zeroes); 
-    auto& denom_matrix = *(cg.incremental_forward());
-    //cerr << "Denominator before logdet: " << denom_matrix << endl;
-    //cerr << "Dimension of the matrix: " << denom_matrix.rows() << " rows and " << denom_matrix.cols() << " columns" << endl;
-    //cerr << "Length of the sentence: " << toks.size() << endl;
-    assert (denom_matrix.rows() == denom_matrix.cols());
-    for (int head = 0; head < denom_matrix.rows(); ++head) {
-      for (int mod = 0; mod < denom_matrix.cols(); ++mod) {
-        if (head == mod && head != 0) {
-          if (denom_matrix(head, mod) <= 0) {
- 	    cerr << "Wrong assertion at head, mod " << head << " " << mod << endl;
-     	    cerr << "Value: " << denom_matrix(head, mod) << endl;
-          }
-          assert (denom_matrix(head, mod) > 0);
-        } else if (head == 0) {
-          assert (denom_matrix(head, mod) > 0);
-        } else {
-          if (denom_matrix(head, mod) > 0) {
-            cerr << "Wrong assertion at head, mod " << head << " " << mod << endl;
-            cerr << "Value: " << denom_matrix(head, mod) << endl;
-          }
-          assert (denom_matrix(head, mod) <= 0);
-        }
-      }
-    }
-    Expression denom_final = logdet(denom);
-    //cerr << "Denominator after logdet: " << setprecision(15) << as_scalar(cg.incremental_forward()) << endl;
-    Expression nll = -(num - denom_final); */
-    //cerr << "Negative log likelihood: " << as_scalar(cg.incremental_forward()) << endl;
-    //cerr << "Milestone 5" << endl;
     return make_pair(root_scores_vector, result_matrix);
   }
+
   //Since this is a pipeline system, only label the head-modifier pairs predicted by the previous step. Returns whether the sentence contains multiple roots
   bool LabelDependencies(ComputationGraph& cg, const vector<Expression>& embedded, const vector<int>& heads, vector<int>& labels) {
     assert ((embedded.size() + 1) == heads.size());
@@ -674,16 +488,10 @@ struct ParserBuilder {
     Expression MLP_labels_softmax = parameter(cg, p_MLP_labels_softmax);
     Expression MLP_labels_softmax_bias = parameter(cg, p_MLP_labels_softmax_bias); 
     int root_ctr = 0;
-    //TODO: delete this
-    //for (int mod = 0; mod < heads.size(); ++mod) {
-    //  cerr << mod << "_" << heads[mod] << "\t";
-    //}
     cerr << endl;
-    //end of deleting
     for (int mod = 1; mod < heads.size(); ++mod) {
       assert (heads[mod] != mod); //a token cannot be the head of itself
       if (heads[mod] == 0) {
-        //cerr << "Does it get here?" << endl;
         labels.push_back(labels_dict.Convert("root"));
         ++root_ctr;
       } else {
@@ -703,7 +511,6 @@ struct ParserBuilder {
          labels.push_back(best_idx);
       }
     }
-    //assert (root_ctr >= 1); 
     if (root_ctr == 0) cerr << "Error! No root of the sentence!" << endl;
     assert (labels.size() == embedded.size());
     if (root_ctr == 1) return false;
@@ -1039,8 +846,6 @@ int main(int argc, char** argv) {
            const vector<int>& currLabels = sentenceLabels[idx];
            assert (currWords.size() == currPos.size() && currWords.size() == currHeads.size() && currPrets.size() == currWords.size() && currWords.size() == currLabels.size());
            ComputationGraph cg;
-           //cerr << "Test 1" << endl;
-           //cerr << "Current sentence: " << order[si] << endl;
            vector<Expression> embedded;
            if (USE_ENSEMBLE) {
              const vector<float>& currCost = cost_matrix[idx];
@@ -1050,7 +855,6 @@ int main(int argc, char** argv) {
              vector<float> dummy;
              parser.BuildGraph(currWords, currPrets, currPos, cg, currHeads, currLabels, true, embedded, dummy);
            }
-           //cerr << "Test 2" << endl;
            double lp = as_scalar(cg.incremental_forward());
            if (lp < 0 || std::isnan(lp)) {
              cerr << "Negative cost < 0 or NaN on sentence " << order[si] << ": lp=" << lp << endl;
@@ -1099,17 +903,11 @@ int main(int argc, char** argv) {
            } else {
              llh += lp;
              trs += currWords.size();
-             //cerr << "Dev root matrix" << endl;
-             //cerr << root_result_matrices.first << endl;
-             //cerr << "Dev all matrix" << endl;
-             //cerr << root_result_matrices.second << endl;
              vector<int> result_CLE = Eisner(root_result_matrices.first, root_result_matrices.second);             
              // Compute the accuracy
              assert (result_CLE.size() == (currHeads.size() + 1));
-             //cerr << "Printing dev result: " << endl;
              for (int i = 0; i < currHeads.size(); ++i) {
                if (currHeads[i] == result_CLE[i+1]) right += 1.0;
-               //cerr << "Gold: " << currHeads[i] << " Predicted: " << result_CLE[i+1] << endl;
              }
            }
         }
@@ -1169,14 +967,7 @@ int main(int argc, char** argv) {
          assert(lp >= 0.0);
        } else {
          llh += lp;
-         //cerr << "Dev root matrix" << endl;
-         //cerr << root_result_matrices.first << endl;
-         //cerr << "Dev all matrix" << endl;
-         //cerr << root_result_matrices.second << endl;
          vector<int> result_CLE = Eisner(root_result_matrices.first, root_result_matrices.second);
-         //for (int j = 0; j < result_CLE.size(); ++j) {
-         //  cerr << j << " " << result_CLE[j] << endl;
-         //}
          cerr << endl;
          vector<int> labels_sent;
          cerr << "Current sentence: " << sii + 1 << endl;
@@ -1188,7 +979,6 @@ int main(int argc, char** argv) {
          labels.push_back(labels_sent);
          assert (result_CLE.size() == (labels_sent.size() + 1));
          // Compute the accuracy
-         //cerr << "Printing dev result: " << endl;
          for (int i = 0; i < currHeads.size(); ++i) {
            if (currHeads[i] == result_CLE[i+1]) right += 1.0;
            total += 1.0;
@@ -1204,13 +994,4 @@ int main(int argc, char** argv) {
       
   }
   
-  /*
-  Expression cnnL = build_matrix(n, input_dim, cg, w_i); 
-  cerr << *(cg.incremental_forward()) << endl;
-  Expression logDet = logdet(cnnL);
-  cnn::real logDet_scalar = as_scalar(cg.incremental_forward());
-  t = clock() - t;
-  cerr << "Logdet = " << logDet_scalar << endl; 
-  cerr << "Time elapsed: " << ((float) t) / CLOCKS_PER_SEC << endl;
-  */
 }
