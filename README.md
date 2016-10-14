@@ -25,7 +25,32 @@ The sample input file for English PTB-SD is at
 
 # Code
 
-The code and full instructions will be released before EMNLP 2016
+### Ensemble votes
+The stack LSTM ensemble votes (used to compute the distillation cost) are provided by the following files:
+`costs/matrices_PTB_SD.txt` (English)
+`costs/matrices_chinese.txt` (Chinese)
+
+The English ensemble votes were computed with 21 models, while the Chinese ensemble votes were computed with 17. 
+
+### Training the distillation parser (English)
+Assuming current directory is `build/`
+`nohup graph-parse/graph-parse-new-cost-mbr --cnn_mem 1700 -t [train.conll]  -d [dev.conll] -P --pretrained_dim [pretrained word embedding dimension] -w [pretrained word embedding file] --cost_matrix ../costs/matrices_PTB_SD.txt --eta_decay 0.05 --num_ensemble 21 -x > log_en.txt`
+
+### Training the distillation parser (Chinese)
+
+`nohup graph-parse/graph-parse-new-cost-mbr --cnn_mem 1700 -t [chinese_train.conll]  -d [chinese_dev.conll] -P --pretrained_dim [pretrained word embedding dimension] -w [pretrained word embedding file] --cost_matrix ../costs/matrices_chinese.txt --eta_decay 0.05 --num_ensemble 21 -x > log_chinese.txt`
+
+### Parameter files
+
+To find out where the parameter file is saved to, look at the `log_en.txt` and `log_chinese.txt`
+
+### Decoding with the distillation parser (English and Chinese)
+`nohup graph-parse/graph-parse-new-cost-mbr --cnn_mem 1700 -t [train.conll]  -p [test.conll] -P --pretrained_dim [pretrained word embedding dimension] -w [pretrained word embedding file] -m [parameter file (.params extension)] > output.txt`
+
+### Evaluation (without punctuations)
+`perl eval.pl -s output.txt -g [test.conll] -q`
+
+German results were reported with punctuations and used a different evaluation script
 
 # Citations
 
@@ -39,4 +64,4 @@ If you use the code, please cite the following work:
 } 
 
 # Contact
-For any questions or issues please e-mail adhiguna.kuncoro [ AT SYMBOL ] gmail [ DOT ] com
+For any questions, issues, or reproducing the German results, please e-mail adhiguna.kuncoro [ AT SYMBOL ] gmail [ DOT ] com

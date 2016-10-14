@@ -356,6 +356,10 @@ struct ParserBuilder {
         assert (currCost.size() == 0);
       }
 
+      for (int mod = 0; mod < heads.size(); ++mod) {
+        assert (heads[mod] >= 0);
+        if (heads[mod] == 0) count_root += 1;
+      }
       assert (count_root >= 1); // a sentence must have at least one root (more for other languages like German)
 
       // the cost matrix (whether distillation or regular Hamming cost) is put back into the computation graph
@@ -439,7 +443,7 @@ struct ParserBuilder {
      Expression total_loss_exp = sum(loss_sum);
      double total_loss = as_scalar(cg.incremental_forward());
      assert (total_loss >= 0.0);
-     cerr << "Score difference (including cost) between the model's best tree and the gold tree is " << total_loss << endl;
+     //cerr << "Score difference (including cost) between the model's best tree and the gold tree is " << total_loss << endl;
      
      // part 1 component of the cost: difference between the model's best and gold tree, taking the cost into account
      Expression final_cost = total_loss_exp;
@@ -471,7 +475,7 @@ struct ParserBuilder {
      double regulariser_cost_1_scalar = as_scalar(cg.incremental_forward());
      Expression regulariser_cost_2 = BETA * squared_norm(MLP_output);
      double regulariser_cost_2_scalar = as_scalar(cg.incremental_forward());
-     cerr << "regulariser cost 1: " << regulariser_cost_1_scalar << " regulariser cost 2: " << regulariser_cost_2_scalar << endl;
+     //cerr << "regulariser cost 1: " << regulariser_cost_1_scalar << " regulariser cost 2: " << regulariser_cost_2_scalar << endl;
      //Final part: add all the costs
      Expression truly_final_cost = final_cost + final_labels_cost + regulariser_cost_1 + regulariser_cost_2;
     } else {
@@ -488,7 +492,7 @@ struct ParserBuilder {
     Expression MLP_labels_softmax = parameter(cg, p_MLP_labels_softmax);
     Expression MLP_labels_softmax_bias = parameter(cg, p_MLP_labels_softmax_bias); 
     int root_ctr = 0;
-    cerr << endl;
+    //cerr << endl;
     for (int mod = 1; mod < heads.size(); ++mod) {
       assert (heads[mod] != mod); //a token cannot be the head of itself
       if (heads[mod] == 0) {
@@ -871,7 +875,7 @@ int main(int argc, char** argv) {
            trs += 1;
       }
       sgd.status();
-      cerr << "update #" << iter << " (epoch " << (tot_seen / sentenceWords.size()) << ")\tllh: "<< llh<<" ppl: " << exp(llh / ((float) trs)) << ", and " << neg / ((float) status_every_i_iterations) * 100.0f << " % of training instances for this update have <0 nll:" << endl; 
+      cerr << "update #" << iter << " (epoch " << (tot_seen / sentenceWords.size()) << ")\ttotal loss: "<< llh<<" average loss: " << (llh / ((float) trs)) << ", and " << neg / ((float) status_every_i_iterations) * 100.0f << " % of training instances for this update have <0 nll:" << endl; 
       llh = trs = neg = 0;
       static int logc = 0;
       ++logc;
@@ -968,9 +972,9 @@ int main(int argc, char** argv) {
        } else {
          llh += lp;
          vector<int> result_CLE = Eisner(root_result_matrices.first, root_result_matrices.second);
-         cerr << endl;
+         //cerr << endl;
          vector<int> labels_sent;
-         cerr << "Current sentence: " << sii + 1 << endl;
+         //cerr << "Current sentence: " << sii + 1 << endl;
          bool multi_root = parser.LabelDependencies(cg, embedded, result_CLE, labels_sent);
          if (multi_root) ++ctr_multiple_roots;
          assert (result_CLE.size() == (currHeads.size() + 1));
@@ -991,6 +995,7 @@ int main(int argc, char** argv) {
     cerr << "Number of sentences with multiple roots: " << ctr_multiple_roots << endl;
     cerr << "Writing down the output file" << endl;
     output_to_conll(conf["test"].as<string>(), sentenceWordsTest, sentencePosTest, results, labels);
+    cerr << "All done!" << endl;
       
   }
   
